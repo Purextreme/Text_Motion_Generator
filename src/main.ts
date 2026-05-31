@@ -25,6 +25,7 @@ interface AppState {
   duration: number;
   fontSize: number;
   fontFamily: string;
+  fontWeight: string;
   color: string;
   seed: number;
   intensity: number;
@@ -43,9 +44,51 @@ const FONT_PRESETS = [
   { label: "Microsoft YaHei", value: '"Microsoft YaHei", sans-serif' },
   { label: "SimHei", value: "SimHei, sans-serif" },
   { label: "SimSun", value: "SimSun, serif" },
+  { label: "OPPOSans", value: "OPPOSans, sans-serif" },
   { label: "PingFang SC", value: '"PingFang SC", sans-serif' },
   { label: "Noto Sans CJK SC", value: '"Noto Sans CJK SC", sans-serif' },
   { label: "Source Han Sans SC", value: '"Source Han Sans SC", sans-serif' },
+];
+const FONT_WEIGHTS = [
+  { label: "Light / 300", value: "300" },
+  { label: "Regular / 400", value: "400" },
+  { label: "Medium / 500", value: "500" },
+  { label: "Bold / 700", value: "700" },
+  { label: "Heavy / 900", value: "900" },
+];
+const FONT_SCAN_CANDIDATES = [
+  "Microsoft YaHei UI",
+  "Microsoft YaHei",
+  "DengXian",
+  "SimHei",
+  "SimSun",
+  "KaiTi",
+  "FangSong",
+  "OPPOSans",
+  "OPPOSans L",
+  "OPPOSans R",
+  "OPPOSans M",
+  "OPPOSans B",
+  "OPPOSans H",
+  "OPPO Sans",
+  "Arial",
+  "Arial Unicode MS",
+  "Calibri",
+  "Cambria",
+  "Candara",
+  "Consolas",
+  "Corbel",
+  "Georgia",
+  "Segoe UI",
+  "Tahoma",
+  "Times New Roman",
+  "Trebuchet MS",
+  "Verdana",
+  "PingFang SC",
+  "Hiragino Sans GB",
+  "Noto Sans CJK SC",
+  "Source Han Sans SC",
+  "WenQuanYi Micro Hei",
 ];
 
 let activeEffect = getDefaultEffect();
@@ -58,6 +101,7 @@ const state: AppState = {
   duration: 2,
   fontSize: 96,
   fontFamily: DEFAULT_FONT_STACK,
+  fontWeight: "900",
   color: "#00f6ff",
   seed: 1234,
   intensity: 0.75,
@@ -106,14 +150,9 @@ app.innerHTML = `
           </select>
         </label>
 
-        <label class="control">
-          <span>font-family 手动输入</span>
-          <input id="fontFamily" type="text" value="${escapeAttribute(state.fontFamily)}" />
-        </label>
-
         <div class="font-actions">
           <button id="scanFonts" type="button">扫描本机字体</button>
-          <span id="fontStatus">浏览器允许时可读取系统字体</span>
+          <span id="fontStatus">优先读取系统字体，失败时检测常见字体</span>
         </div>
 
         <div class="inline-grid">
@@ -122,10 +161,17 @@ app.innerHTML = `
             <input id="fontSize" type="number" min="24" max="260" step="1" value="${state.fontSize}" />
           </label>
           <label class="control">
-            <span>主颜色</span>
-            <input id="color" type="color" value="${state.color}" />
+            <span>字重</span>
+            <select id="fontWeight">
+              ${FONT_WEIGHTS.map((weight) => `<option value="${escapeAttribute(weight.value)}">${escapeHtml(weight.label)}</option>`).join("")}
+            </select>
           </label>
         </div>
+
+        <label class="control">
+          <span>主颜色</span>
+          <input id="color" type="color" value="${state.color}" />
+        </label>
 
         <div class="inline-grid">
           <label class="control">
@@ -161,10 +207,12 @@ app.innerHTML = `
           </label>
         </div>
 
-        <label class="control">
-          <span>随机种子</span>
-          <input id="seed" type="number" step="1" value="${state.seed}" />
-        </label>
+        <div class="inline-grid">
+          <label class="control">
+            <span>随机种子</span>
+            <input id="seed" type="number" step="1" value="${state.seed}" />
+          </label>
+        </div>
 
         <label class="control">
           <span class="value-row"><span>故障强度</span><output id="intensityValue">${state.intensity.toFixed(2)}</output></span>
@@ -199,6 +247,14 @@ app.innerHTML = `
     </aside>
 
     <section class="preview-panel">
+      <div class="preview-header">
+        <div>
+          <p class="eyebrow">LIVE PREVIEW</p>
+          <h2>实时预览</h2>
+        </div>
+        <div id="previewMeta" class="preview-meta"></div>
+      </div>
+
       <div class="canvas-stage">
         <canvas id="preview" aria-label="Animation preview"></canvas>
       </div>
@@ -217,11 +273,12 @@ const exportButton = getElement<HTMLButtonElement>("export");
 const timeline = getElement<HTMLInputElement>("timeline");
 const timecode = getElement<HTMLDivElement>("timecode");
 const frameReadout = getElement<HTMLDivElement>("frameReadout");
+const previewMeta = getElement<HTMLDivElement>("previewMeta");
 const exportProgress = getElement<HTMLProgressElement>("exportProgress");
 const exportStatus = getElement<HTMLDivElement>("exportStatus");
 const effectDescription = getElement<HTMLParagraphElement>("effectDescription");
 const fontPreset = getElement<HTMLSelectElement>("fontPreset");
-const fontFamilyInput = getElement<HTMLInputElement>("fontFamily");
+const fontWeightSelect = getElement<HTMLSelectElement>("fontWeight");
 const fontStatus = getElement<HTMLSpanElement>("fontStatus");
 
 let lastTimestamp = performance.now();
@@ -246,13 +303,11 @@ function bindControls(): void {
   bindInput("text", (value) => {
     state.text = value;
   });
-  bindInput("fontFamily", (value) => {
-    state.fontFamily = value.trim() || "sans-serif";
-    syncFontPresetSelection();
-  });
   bindSelect("fontPreset", (value) => {
     state.fontFamily = value;
-    fontFamilyInput.value = value;
+  });
+  bindSelect("fontWeight", (value) => {
+    state.fontWeight = value;
   });
   bindNumber("fontSize", (value) => {
     state.fontSize = value;
@@ -316,6 +371,7 @@ function bindControls(): void {
   getElement<HTMLSelectElement>("background").value = state.background;
   getElement<HTMLSelectElement>("resolution").value = state.resolution;
   getElement<HTMLSelectElement>("fps").value = String(state.fps);
+  fontWeightSelect.value = state.fontWeight;
   getElement<HTMLButtonElement>("scanFonts").addEventListener("click", () => {
     void scanLocalFonts();
   });
@@ -357,7 +413,8 @@ function getRenderParams(frame: number): TextEffectParams {
     duration: state.duration,
     width: dimensions.width,
     height: dimensions.height,
-    fontFamily: state.fontFamily,
+    fontFamily: getEffectiveFontFamily(),
+    fontWeight: state.fontWeight,
     fontSize: state.fontSize,
     color: state.color,
     seed: state.seed,
@@ -393,34 +450,90 @@ async function exportSequence(): Promise<void> {
 }
 
 async function scanLocalFonts(): Promise<void> {
-  if (!window.queryLocalFonts) {
-    fontStatus.textContent = "当前浏览器不支持系统字体扫描，请使用预设或手动输入。";
+  fontStatus.textContent = "正在扫描字体...";
+  let families: string[] = [];
+  let scanSource = "";
+
+  if (window.queryLocalFonts) {
+    try {
+      const fonts = await window.queryLocalFonts();
+      families = uniqueSorted(fonts.map((font) => font.family).filter(Boolean));
+      scanSource = "系统字体";
+    } catch {
+      families = [];
+    }
+  }
+
+  if (families.length === 0) {
+    families = detectInstalledFonts();
+    scanSource = "常见字体";
+  }
+
+  families = uniqueSorted(families.map(normalizeFontFamilyName));
+  removeSystemFontOptions();
+
+  const appendedCount = appendSystemFontOptions(families);
+
+  if (families.length === 0) {
+    fontStatus.textContent = "当前浏览器没有返回字体，已保留预设字体。";
     return;
   }
 
-  fontStatus.textContent = "正在请求字体权限...";
+  fontStatus.textContent =
+    appendedCount > 0
+      ? `已添加 ${appendedCount} 个${scanSource}。`
+      : `已确认 ${families.length} 个${scanSource}，均已在预设中。`;
+  syncFontPresetSelection();
+}
 
-  try {
-    const fonts = await window.queryLocalFonts();
-    const families = [...new Set(fonts.map((font) => font.family).filter(Boolean))].sort((a, b) =>
-      a.localeCompare(b, "zh-Hans-CN"),
-    );
+function appendSystemFontOptions(families: string[]): number {
+  const existingValues = new Set(Array.from(fontPreset.options).map((option) => option.value));
+  let appendedCount = 0;
 
-    removeSystemFontOptions();
+  for (const family of families) {
+    const value = quoteFontFamily(family);
 
-    for (const family of families) {
-      const option = document.createElement("option");
-      option.value = quoteFontFamily(family);
-      option.textContent = family;
-      option.dataset.systemFont = "true";
-      fontPreset.append(option);
+    if (existingValues.has(value)) {
+      continue;
     }
 
-    fontStatus.textContent = `已读取 ${families.length} 个字体家族。`;
-    syncFontPresetSelection();
-  } catch {
-    fontStatus.textContent = "未获得字体权限，请使用预设或手动输入。";
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = family;
+    option.dataset.systemFont = "true";
+    fontPreset.append(option);
+    existingValues.add(value);
+    appendedCount += 1;
   }
+
+  return appendedCount;
+}
+
+function detectInstalledFonts(): string[] {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return [];
+  }
+
+  const sample = "字体检测 AaBbCc 123";
+  const baseFamilies = ["monospace", "sans-serif", "serif"];
+  const baseWidths = new Map<string, number>();
+
+  for (const baseFamily of baseFamilies) {
+    context.font = `72px ${baseFamily}`;
+    baseWidths.set(baseFamily, context.measureText(sample).width);
+  }
+
+  return FONT_SCAN_CANDIDATES.filter((family) =>
+    baseFamilies.some((baseFamily) => {
+      context.font = `72px ${formatFontFamilyName(family)}, ${baseFamily}`;
+      const width = context.measureText(sample).width;
+      const baseWidth = baseWidths.get(baseFamily) ?? width;
+      return Math.abs(width - baseWidth) > 0.1;
+    }),
+  );
 }
 
 function removeSystemFontOptions(): void {
@@ -436,9 +549,35 @@ function syncFontPresetSelection(): void {
   fontPreset.value = matchingOption ? matchingOption.value : "";
 }
 
-function quoteFontFamily(family: string): string {
+function getEffectiveFontFamily(): string {
+  return isOppoFontFamily(state.fontFamily) ? '"OPPOSans", sans-serif' : state.fontFamily;
+}
+
+function isOppoFontFamily(fontFamily: string): boolean {
+  return fontFamily.includes("OPPOSans") || fontFamily.includes("OPPO Sans");
+}
+
+function normalizeFontFamilyName(family: string): string {
   const cleaned = family.replace(/"/g, "").trim();
-  return cleaned.includes(" ") ? `"${cleaned}", sans-serif` : `${cleaned}, sans-serif`;
+
+  if (/^oppo\s?sans(?:\s+[lrmhb])?$/i.test(cleaned)) {
+    return "OPPOSans";
+  }
+
+  return cleaned;
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+function quoteFontFamily(family: string): string {
+  return `${formatFontFamilyName(family)}, sans-serif`;
+}
+
+function formatFontFamilyName(family: string): string {
+  const cleaned = family.replace(/"/g, "").trim();
+  return cleaned.includes(" ") ? `"${cleaned}"` : cleaned;
 }
 
 function downloadBlob(blob: Blob, filename: string): void {
@@ -458,6 +597,7 @@ function syncTimeline(): void {
   timeline.value = String(state.frame);
   timecode.textContent = `${formatTime(state.frame / state.fps)} / ${formatTime(state.duration)}`;
   frameReadout.textContent = `Frame ${state.frame} / ${totalFrames - 1}`;
+  previewMeta.textContent = `${activeEffect.name} · ${state.resolution.replace("x", " × ")} · ${state.fps} FPS`;
 }
 
 function clampFrame(): void {

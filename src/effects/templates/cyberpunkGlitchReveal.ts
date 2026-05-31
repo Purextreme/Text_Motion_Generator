@@ -380,5 +380,5 @@ function getGlitchState(params: TextEffectParams, progress: number): { amount: n
 }
 
 function buildFont(params: TextEffectParams): string {
-  return `900 ${params.fontSize}px ${params.fontFamily}`;
+  return `${params.fontWeight} ${params.fontSize}px ${params.fontFamily}`;
 }

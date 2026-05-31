@@ -8,6 +8,7 @@ export interface TextEffectParams {
   width: number;
   height: number;
   fontFamily: string;
+  fontWeight: string;
   fontSize: number;
   color: string;
   seed: number;
