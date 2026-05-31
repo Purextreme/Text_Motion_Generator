@@ -1,4 +1,35 @@
 export type BackgroundMode = "transparent" | "black" | "dark-blue";
+export type TextEffectControlValue = string | number | boolean;
+
+export type TextEffectControl =
+  | {
+      type: "range" | "number";
+      id: string;
+      label: string;
+      defaultValue: number;
+      min?: number;
+      max?: number;
+      step?: number;
+    }
+  | {
+      type: "color" | "text";
+      id: string;
+      label: string;
+      defaultValue: string;
+    }
+  | {
+      type: "select";
+      id: string;
+      label: string;
+      defaultValue: string;
+      options: Array<{ label: string; value: string }>;
+    }
+  | {
+      type: "checkbox";
+      id: string;
+      label: string;
+      defaultValue: boolean;
+    };
 
 export interface TextEffectParams {
   text: string;
@@ -17,6 +48,7 @@ export interface TextEffectParams {
   scanline: number;
   decoration: number;
   background: BackgroundMode;
+  custom: Record<string, TextEffectControlValue>;
 }
 
 export interface TextEffect {
@@ -24,6 +56,7 @@ export interface TextEffect {
   name: string;
   version: string;
   description: string;
+  controls?: TextEffectControl[];
   render(ctx: CanvasRenderingContext2D, params: TextEffectParams): void;
 }
 

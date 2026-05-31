@@ -19,6 +19,44 @@ export const effect = defineTextEffect({
   name: "Cyberpunk Glitch Reveal",
   version: "1.0.0",
   description: "中文优先的解码出现、短促故障、RGB 分离和霓虹发光文字效果。",
+  controls: [
+    {
+      type: "range",
+      id: "intensity",
+      label: "故障强度",
+      defaultValue: 0.75,
+      min: 0,
+      max: 1,
+      step: 0.01,
+    },
+    {
+      type: "range",
+      id: "glow",
+      label: "发光",
+      defaultValue: 0.6,
+      min: 0,
+      max: 1,
+      step: 0.01,
+    },
+    {
+      type: "range",
+      id: "scanline",
+      label: "扫描线",
+      defaultValue: 0.35,
+      min: 0,
+      max: 1,
+      step: 0.01,
+    },
+    {
+      type: "range",
+      id: "decoration",
+      label: "文字周边装饰",
+      defaultValue: 0.62,
+      min: 0,
+      max: 1,
+      step: 0.01,
+    },
+  ],
   render(ctx, params) {
     const { width, height } = params;
     const totalFrames = Math.max(1, Math.round(params.duration * params.fps));
