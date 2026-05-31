@@ -1,5 +1,5 @@
 import "./styles.css";
-import type { BackgroundMode, TextEffectParams } from "./effects/types";
+import type { BackgroundMode, TextEffectControl, TextEffectControlValue, TextEffectParams } from "./effects/types";
 import { effects, getDefaultEffect } from "./effects/registry";
 import { configureCanvas, renderFrame } from "./renderer/canvasRenderer";
 import { exportPngSequenceZip } from "./renderer/exportPngSequence";
@@ -28,11 +28,8 @@ interface AppState {
   fontWeight: string;
   color: string;
   seed: number;
-  intensity: number;
-  glow: number;
-  scanline: number;
-  decoration: number;
   background: BackgroundMode;
+  customByEffectId: Record<string, Record<string, TextEffectControlValue>>;
   isPlaying: boolean;
   frame: number;
 }
@@ -104,11 +101,8 @@ const state: AppState = {
   fontWeight: "900",
   color: "#00f6ff",
   seed: 1234,
-  intensity: 0.75,
-  glow: 0.6,
-  scanline: 0.35,
-  decoration: 0.62,
   background: "transparent",
+  customByEffectId: {},
   isPlaying: true,
   frame: 0,
 };
@@ -214,25 +208,7 @@ app.innerHTML = `
           </label>
         </div>
 
-        <label class="control">
-          <span class="value-row"><span>故障强度</span><output id="intensityValue">${state.intensity.toFixed(2)}</output></span>
-          <input id="intensity" type="range" min="0" max="1" step="0.01" value="${state.intensity}" />
-        </label>
-
-        <label class="control">
-          <span class="value-row"><span>发光</span><output id="glowValue">${state.glow.toFixed(2)}</output></span>
-          <input id="glow" type="range" min="0" max="1" step="0.01" value="${state.glow}" />
-        </label>
-
-        <label class="control">
-          <span class="value-row"><span>扫描线</span><output id="scanlineValue">${state.scanline.toFixed(2)}</output></span>
-          <input id="scanline" type="range" min="0" max="1" step="0.01" value="${state.scanline}" />
-        </label>
-
-        <label class="control">
-          <span class="value-row"><span>文字周边装饰</span><output id="decorationValue">${state.decoration.toFixed(2)}</output></span>
-          <input id="decoration" type="range" min="0" max="1" step="0.01" value="${state.decoration}" />
-        </label>
+        <section id="effectControls" class="effect-controls"></section>
       </section>
 
       <section class="button-row">
@@ -277,6 +253,7 @@ const previewMeta = getElement<HTMLDivElement>("previewMeta");
 const exportProgress = getElement<HTMLProgressElement>("exportProgress");
 const exportStatus = getElement<HTMLDivElement>("exportStatus");
 const effectDescription = getElement<HTMLParagraphElement>("effectDescription");
+const effectControls = getElement<HTMLElement>("effectControls");
 const fontPreset = getElement<HTMLSelectElement>("fontPreset");
 const fontWeightSelect = getElement<HTMLSelectElement>("fontWeight");
 const fontStatus = getElement<HTMLSpanElement>("fontStatus");
@@ -299,6 +276,8 @@ function bindControls(): void {
     activeEffect = nextEffect;
     state.activeEffectId = nextEffect.id;
     effectDescription.textContent = nextEffect.description;
+    ensureEffectCustomValues(nextEffect.controls);
+    renderEffectControls();
   });
   bindInput("text", (value) => {
     state.text = value;
@@ -337,18 +316,6 @@ function bindControls(): void {
   bindNumber("seed", (value) => {
     state.seed = Math.round(value);
   });
-  bindRange("intensity", "intensityValue", (value) => {
-    state.intensity = value;
-  });
-  bindRange("glow", "glowValue", (value) => {
-    state.glow = value;
-  });
-  bindRange("scanline", "scanlineValue", (value) => {
-    state.scanline = value;
-  });
-  bindRange("decoration", "decorationValue", (value) => {
-    state.decoration = value;
-  });
 
   playPauseButton.addEventListener("click", () => {
     state.isPlaying = !state.isPlaying;
@@ -375,6 +342,8 @@ function bindControls(): void {
   getElement<HTMLButtonElement>("scanFonts").addEventListener("click", () => {
     void scanLocalFonts();
   });
+  ensureEffectCustomValues(activeEffect.controls);
+  renderEffectControls();
   syncFontPresetSelection();
   syncTimeline();
 }
@@ -406,6 +375,7 @@ function renderCurrentFrame(): void {
 
 function getRenderParams(frame: number): TextEffectParams {
   const dimensions = getDimensions();
+  const custom = getEffectCustomValues();
   return {
     text: state.text,
     frame,
@@ -418,12 +388,150 @@ function getRenderParams(frame: number): TextEffectParams {
     fontSize: state.fontSize,
     color: state.color,
     seed: state.seed,
-    intensity: state.intensity,
-    glow: state.glow,
-    scanline: state.scanline,
-    decoration: state.decoration,
+    intensity: getNumberCustomValue(custom, "intensity", 0.75),
+    glow: getNumberCustomValue(custom, "glow", 0.6),
+    scanline: getNumberCustomValue(custom, "scanline", 0.35),
+    decoration: getNumberCustomValue(custom, "decoration", 0.62),
     background: state.background,
+    custom,
   };
+}
+
+function renderEffectControls(): void {
+  const controls = activeEffect.controls ?? [];
+
+  if (controls.length === 0) {
+    effectControls.replaceChildren();
+    return;
+  }
+
+  ensureEffectCustomValues(controls);
+  effectControls.innerHTML = `
+    <div class="effect-controls-header">当前效果参数</div>
+    ${controls.map((control) => renderControlMarkup(control)).join("")}
+  `;
+
+  for (const control of controls) {
+    bindEffectControl(control);
+  }
+}
+
+function renderControlMarkup(control: TextEffectControl): string {
+  const value = getEffectCustomValues()[control.id] ?? control.defaultValue;
+  const id = getControlElementId(control.id);
+
+  if (control.type === "range") {
+    const numericValue = Number(value);
+    return `
+      <label class="control">
+        <span class="value-row"><span>${escapeHtml(control.label)}</span><output id="${id}Value">${formatControlNumber(numericValue)}</output></span>
+        <input id="${id}" type="range" min="${control.min ?? 0}" max="${control.max ?? 1}" step="${control.step ?? 0.01}" value="${numericValue}" />
+      </label>
+    `;
+  }
+
+  if (control.type === "number") {
+    return `
+      <label class="control">
+        <span>${escapeHtml(control.label)}</span>
+        <input id="${id}" type="number" ${renderOptionalNumberAttribute("min", control.min)} ${renderOptionalNumberAttribute("max", control.max)} step="${control.step ?? 1}" value="${Number(value)}" />
+      </label>
+    `;
+  }
+
+  if (control.type === "select") {
+    return `
+      <label class="control">
+        <span>${escapeHtml(control.label)}</span>
+        <select id="${id}">
+          ${control.options
+            .map(
+              (option) =>
+                `<option value="${escapeAttribute(option.value)}" ${option.value === value ? "selected" : ""}>${escapeHtml(option.label)}</option>`,
+            )
+            .join("")}
+        </select>
+      </label>
+    `;
+  }
+
+  if (control.type === "checkbox") {
+    return `
+      <label class="control checkbox-control">
+        <span>${escapeHtml(control.label)}</span>
+        <input id="${id}" type="checkbox" ${value === true ? "checked" : ""} />
+      </label>
+    `;
+  }
+
+  return `
+    <label class="control">
+      <span>${escapeHtml(control.label)}</span>
+      <input id="${id}" type="${control.type === "color" ? "color" : "text"}" value="${escapeAttribute(String(value))}" />
+    </label>
+  `;
+}
+
+function bindEffectControl(control: TextEffectControl): void {
+  const input = getElement<HTMLInputElement | HTMLSelectElement>(getControlElementId(control.id));
+
+  input.addEventListener("input", () => {
+    const custom = getEffectCustomValues();
+    custom[control.id] = readControlValue(control, input);
+
+    if (control.type === "range") {
+      const output = getElement<HTMLOutputElement>(`${getControlElementId(control.id)}Value`);
+      output.value = formatControlNumber(Number(custom[control.id]));
+    }
+
+    renderCurrentFrame();
+  });
+}
+
+function readControlValue(control: TextEffectControl, input: HTMLInputElement | HTMLSelectElement): TextEffectControlValue {
+  if (control.type === "checkbox") {
+    return (input as HTMLInputElement).checked;
+  }
+
+  if (control.type === "range" || control.type === "number") {
+    return Number(input.value);
+  }
+
+  return input.value;
+}
+
+function ensureEffectCustomValues(controls = activeEffect.controls): void {
+  const values = getEffectCustomValues();
+
+  for (const control of controls ?? []) {
+    values[control.id] ??= control.defaultValue;
+  }
+}
+
+function getEffectCustomValues(): Record<string, TextEffectControlValue> {
+  state.customByEffectId[activeEffect.id] ??= {};
+  return state.customByEffectId[activeEffect.id];
+}
+
+function getNumberCustomValue(
+  custom: Record<string, TextEffectControlValue>,
+  id: string,
+  fallback: number,
+): number {
+  const value = custom[id];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function getControlElementId(controlId: string): string {
+  return `effectControl-${controlId}`;
+}
+
+function formatControlNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function renderOptionalNumberAttribute(name: string, value: number | undefined): string {
+  return typeof value === "number" ? `${name}="${value}"` : "";
 }
 
 async function exportSequence(): Promise<void> {
