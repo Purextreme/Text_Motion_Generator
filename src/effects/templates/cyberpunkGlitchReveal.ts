@@ -1,6 +1,7 @@
-import type { TextEffect, TextEffectParams } from "./types";
-import { clamp, easeOutCubic, smoothstep } from "../utils/easing";
-import { randomFromSeed, seededValue } from "../utils/seededRandom";
+import type { TextEffectParams } from "../types";
+import { defineTextEffect } from "../types";
+import { clamp, easeOutCubic, smoothstep } from "../../utils/easing";
+import { randomFromSeed, seededValue } from "../../utils/seededRandom";
 
 const CHAR_POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789零一二三四五六七八九甲乙丙丁子丑寅卯#$%&<>[]{}+-*/_";
 
@@ -13,8 +14,11 @@ interface TextLayout {
   descent: number;
 }
 
-export const cyberpunkGlitchReveal: TextEffect = {
+export const effect = defineTextEffect({
+  id: "cyberpunk-glitch-reveal",
   name: "Cyberpunk Glitch Reveal",
+  version: "1.0.0",
+  description: "中文优先的解码出现、短促故障、RGB 分离和霓虹发光文字效果。",
   render(ctx, params) {
     const { width, height } = params;
     const totalFrames = Math.max(1, Math.round(params.duration * params.fps));
@@ -29,11 +33,14 @@ export const cyberpunkGlitchReveal: TextEffect = {
     const displayText = buildDecodedText(params, revealProgress);
     const layer = renderTextLayer(params, displayText, layout, progress);
 
-    drawHud(ctx, params, layout, progress, glitch.amount);
+    if (params.decoration > 0) {
+      drawHud(ctx, params, layout, progress, glitch.amount);
+    }
+
     drawTextComposite(ctx, layer, params, glitch);
     drawScanlines(ctx, params, layout, progress);
   },
-};
+});
 
 function resetCanvas(ctx: CanvasRenderingContext2D, width: number, height: number): void {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -259,15 +266,16 @@ function drawHud(
 ): void {
   const reveal = smoothstep(0.12, 0.46, progress);
   const flicker = 0.8 + seededValue(params.seed, `hud-${params.frame >> 1}`) * 0.2;
-  const alpha = reveal * flicker * (0.56 + glitchAmount * 0.3);
-  const padX = params.fontSize * 0.36;
-  const padY = params.fontSize * 0.42;
+  const decoration = clamp(params.decoration);
+  const alpha = reveal * flicker * decoration * (0.46 + glitchAmount * 0.24);
+  const padX = params.fontSize * 0.22;
+  const padY = params.fontSize * 0.24;
   const left = layout.x - padX;
   const right = layout.x + layout.width + padX;
   const top = layout.y - layout.ascent - padY;
   const bottom = layout.y + layout.descent + padY * 0.7;
-  const corner = params.fontSize * 0.22;
-  const tick = params.fontSize * 0.34;
+  const corner = params.fontSize * 0.16;
+  const tick = params.fontSize * 0.24;
   const square = Math.max(4, params.fontSize * 0.055);
 
   ctx.save();

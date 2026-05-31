@@ -1,11 +1,25 @@
 import "./styles.css";
-import { cyberpunkGlitchReveal } from "./effects/cyberpunkGlitchReveal";
 import type { BackgroundMode, TextEffectParams } from "./effects/types";
+import { effects, getDefaultEffect } from "./effects/registry";
 import { configureCanvas, renderFrame } from "./renderer/canvasRenderer";
 import { exportPngSequenceZip } from "./renderer/exportPngSequence";
 
+interface LocalFontData {
+  family: string;
+  fullName: string;
+  postscriptName: string;
+  style: string;
+}
+
+declare global {
+  interface Window {
+    queryLocalFonts?: () => Promise<LocalFontData[]>;
+  }
+}
+
 interface AppState {
   text: string;
+  activeEffectId: string;
   resolution: string;
   fps: number;
   duration: number;
@@ -16,25 +30,40 @@ interface AppState {
   intensity: number;
   glow: number;
   scanline: number;
+  decoration: number;
   background: BackgroundMode;
   isPlaying: boolean;
   frame: number;
 }
 
-const activeEffect = cyberpunkGlitchReveal;
+const DEFAULT_FONT_STACK = '"Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif';
+const FONT_PRESETS = [
+  { label: "中文默认字体栈", value: DEFAULT_FONT_STACK },
+  { label: "Microsoft YaHei UI", value: '"Microsoft YaHei UI", sans-serif' },
+  { label: "Microsoft YaHei", value: '"Microsoft YaHei", sans-serif' },
+  { label: "SimHei", value: "SimHei, sans-serif" },
+  { label: "SimSun", value: "SimSun, serif" },
+  { label: "PingFang SC", value: '"PingFang SC", sans-serif' },
+  { label: "Noto Sans CJK SC", value: '"Noto Sans CJK SC", sans-serif' },
+  { label: "Source Han Sans SC", value: '"Source Han Sans SC", sans-serif' },
+];
+
+let activeEffect = getDefaultEffect();
 
 const state: AppState = {
   text: "系统已上线",
+  activeEffectId: activeEffect.id,
   resolution: "1920x1080",
   fps: 30,
   duration: 2,
   fontSize: 96,
-  fontFamily: '"Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif',
+  fontFamily: DEFAULT_FONT_STACK,
   color: "#00f6ff",
   seed: 1234,
   intensity: 0.75,
   glow: 0.6,
   scanline: 0.35,
+  decoration: 0.62,
   background: "transparent",
   isPlaying: true,
   frame: 0,
@@ -50,36 +79,57 @@ app.innerHTML = `
   <main class="app-shell">
     <aside class="control-panel">
       <section class="brand">
-        <p class="eyebrow">MVP frame generator</p>
-        <h1>Text Motion</h1>
-        <p class="effect-name">${activeEffect.name}</p>
+        <p class="eyebrow">中文文字动效序列帧</p>
+        <h1>文字动效</h1>
+        <p id="effectDescription" class="effect-name">${escapeHtml(activeEffect.description)}</p>
       </section>
 
       <section class="control-grid">
         <label class="control">
-          <span>Text</span>
-          <input id="text" type="text" value="${state.text}" />
+          <span>效果模板</span>
+          <select id="effect">
+            ${effects
+              .map((effect) => `<option value="${escapeAttribute(effect.id)}">${escapeHtml(effect.name)} v${escapeHtml(effect.version)}</option>`)
+              .join("")}
+          </select>
         </label>
 
         <label class="control">
-          <span>Font family</span>
-          <input id="fontFamily" type="text" value="${state.fontFamily}" />
+          <span>文字内容</span>
+          <input id="text" type="text" value="${escapeAttribute(state.text)}" />
         </label>
+
+        <label class="control">
+          <span>字体预设 / 系统字体</span>
+          <select id="fontPreset">
+            ${FONT_PRESETS.map((font) => `<option value="${escapeAttribute(font.value)}">${escapeHtml(font.label)}</option>`).join("")}
+          </select>
+        </label>
+
+        <label class="control">
+          <span>font-family 手动输入</span>
+          <input id="fontFamily" type="text" value="${escapeAttribute(state.fontFamily)}" />
+        </label>
+
+        <div class="font-actions">
+          <button id="scanFonts" type="button">扫描本机字体</button>
+          <span id="fontStatus">浏览器允许时可读取系统字体</span>
+        </div>
 
         <div class="inline-grid">
           <label class="control">
-            <span>Font size</span>
+            <span>字号</span>
             <input id="fontSize" type="number" min="24" max="260" step="1" value="${state.fontSize}" />
           </label>
           <label class="control">
-            <span>Main color</span>
+            <span>主颜色</span>
             <input id="color" type="color" value="${state.color}" />
           </label>
         </div>
 
         <div class="inline-grid">
           <label class="control">
-            <span>Background</span>
+            <span>背景</span>
             <select id="background">
               <option value="transparent">transparent</option>
               <option value="black">black</option>
@@ -87,7 +137,7 @@ app.innerHTML = `
             </select>
           </label>
           <label class="control">
-            <span>Resolution</span>
+            <span>分辨率</span>
             <select id="resolution">
               <option value="1920x1080">1920x1080</option>
               <option value="1080x1080">1080x1080</option>
@@ -106,40 +156,45 @@ app.innerHTML = `
             </select>
           </label>
           <label class="control">
-            <span>Duration</span>
+            <span>时长</span>
             <input id="duration" type="number" min="0.25" max="10" step="0.25" value="${state.duration}" />
           </label>
         </div>
 
         <label class="control">
-          <span>Seed</span>
+          <span>随机种子</span>
           <input id="seed" type="number" step="1" value="${state.seed}" />
         </label>
 
         <label class="control">
-          <span class="value-row"><span>Intensity</span><output id="intensityValue">${state.intensity.toFixed(2)}</output></span>
+          <span class="value-row"><span>故障强度</span><output id="intensityValue">${state.intensity.toFixed(2)}</output></span>
           <input id="intensity" type="range" min="0" max="1" step="0.01" value="${state.intensity}" />
         </label>
 
         <label class="control">
-          <span class="value-row"><span>Glow</span><output id="glowValue">${state.glow.toFixed(2)}</output></span>
+          <span class="value-row"><span>发光</span><output id="glowValue">${state.glow.toFixed(2)}</output></span>
           <input id="glow" type="range" min="0" max="1" step="0.01" value="${state.glow}" />
         </label>
 
         <label class="control">
-          <span class="value-row"><span>Scanline</span><output id="scanlineValue">${state.scanline.toFixed(2)}</output></span>
+          <span class="value-row"><span>扫描线</span><output id="scanlineValue">${state.scanline.toFixed(2)}</output></span>
           <input id="scanline" type="range" min="0" max="1" step="0.01" value="${state.scanline}" />
+        </label>
+
+        <label class="control">
+          <span class="value-row"><span>文字周边装饰</span><output id="decorationValue">${state.decoration.toFixed(2)}</output></span>
+          <input id="decoration" type="range" min="0" max="1" step="0.01" value="${state.decoration}" />
         </label>
       </section>
 
       <section class="button-row">
-        <button id="playPause" type="button">Pause</button>
-        <button id="export" type="button" class="export-button">Export PNG ZIP</button>
+        <button id="playPause" type="button">暂停</button>
+        <button id="export" type="button" class="export-button">导出 PNG ZIP</button>
       </section>
 
       <div class="progress-wrap">
         <progress id="exportProgress" value="0" max="1"></progress>
-        <div id="exportStatus" class="progress-text">Ready</div>
+        <div id="exportStatus" class="progress-text">就绪</div>
       </div>
     </aside>
 
@@ -164,6 +219,10 @@ const timecode = getElement<HTMLDivElement>("timecode");
 const frameReadout = getElement<HTMLDivElement>("frameReadout");
 const exportProgress = getElement<HTMLProgressElement>("exportProgress");
 const exportStatus = getElement<HTMLDivElement>("exportStatus");
+const effectDescription = getElement<HTMLParagraphElement>("effectDescription");
+const fontPreset = getElement<HTMLSelectElement>("fontPreset");
+const fontFamilyInput = getElement<HTMLInputElement>("fontFamily");
+const fontStatus = getElement<HTMLSpanElement>("fontStatus");
 
 let lastTimestamp = performance.now();
 let ctx = configureCanvas(canvas, getDimensions().width, getDimensions().height);
@@ -173,11 +232,27 @@ renderCurrentFrame();
 requestAnimationFrame(tick);
 
 function bindControls(): void {
+  bindSelect("effect", (value) => {
+    const nextEffect = effects.find((effect) => effect.id === value);
+
+    if (!nextEffect) {
+      return;
+    }
+
+    activeEffect = nextEffect;
+    state.activeEffectId = nextEffect.id;
+    effectDescription.textContent = nextEffect.description;
+  });
   bindInput("text", (value) => {
     state.text = value;
   });
   bindInput("fontFamily", (value) => {
     state.fontFamily = value.trim() || "sans-serif";
+    syncFontPresetSelection();
+  });
+  bindSelect("fontPreset", (value) => {
+    state.fontFamily = value;
+    fontFamilyInput.value = value;
   });
   bindNumber("fontSize", (value) => {
     state.fontSize = value;
@@ -216,17 +291,20 @@ function bindControls(): void {
   bindRange("scanline", "scanlineValue", (value) => {
     state.scanline = value;
   });
+  bindRange("decoration", "decorationValue", (value) => {
+    state.decoration = value;
+  });
 
   playPauseButton.addEventListener("click", () => {
     state.isPlaying = !state.isPlaying;
-    playPauseButton.textContent = state.isPlaying ? "Pause" : "Play";
+    playPauseButton.textContent = state.isPlaying ? "暂停" : "播放";
     lastTimestamp = performance.now();
   });
 
   timeline.addEventListener("input", () => {
     state.frame = Number(timeline.value);
     state.isPlaying = false;
-    playPauseButton.textContent = "Play";
+    playPauseButton.textContent = "播放";
     renderCurrentFrame();
   });
 
@@ -234,9 +312,14 @@ function bindControls(): void {
     void exportSequence();
   });
 
+  getElement<HTMLSelectElement>("effect").value = state.activeEffectId;
   getElement<HTMLSelectElement>("background").value = state.background;
   getElement<HTMLSelectElement>("resolution").value = state.resolution;
   getElement<HTMLSelectElement>("fps").value = String(state.fps);
+  getElement<HTMLButtonElement>("scanFonts").addEventListener("click", () => {
+    void scanLocalFonts();
+  });
+  syncFontPresetSelection();
   syncTimeline();
 }
 
@@ -281,6 +364,7 @@ function getRenderParams(frame: number): TextEffectParams {
     intensity: state.intensity,
     glow: state.glow,
     scanline: state.scanline,
+    decoration: state.decoration,
     background: state.background,
   };
 }
@@ -288,24 +372,73 @@ function getRenderParams(frame: number): TextEffectParams {
 async function exportSequence(): Promise<void> {
   exportButton.disabled = true;
   exportProgress.value = 0;
-  exportStatus.textContent = "Rendering frames...";
+  exportStatus.textContent = "正在渲染帧...";
 
   try {
     const blob = await exportPngSequenceZip(activeEffect, getRenderParams(0), (progress) => {
       exportProgress.value = progress.current / progress.total;
       exportStatus.textContent =
         progress.phase === "zipping"
-          ? `Zipping ${Math.round((progress.current / progress.total) * 100)}%`
-          : `Rendering ${progress.current} / ${progress.total}`;
+          ? `正在打包 ${Math.round((progress.current / progress.total) * 100)}%`
+          : `正在渲染 ${progress.current} / ${progress.total}`;
     });
 
     downloadBlob(blob, `text_anim_${state.resolution}_${state.fps}fps.zip`);
-    exportStatus.textContent = "Export complete";
+    exportStatus.textContent = "导出完成";
   } catch (error) {
-    exportStatus.textContent = error instanceof Error ? error.message : "Export failed";
+    exportStatus.textContent = error instanceof Error ? error.message : "导出失败";
   } finally {
     exportButton.disabled = false;
   }
+}
+
+async function scanLocalFonts(): Promise<void> {
+  if (!window.queryLocalFonts) {
+    fontStatus.textContent = "当前浏览器不支持系统字体扫描，请使用预设或手动输入。";
+    return;
+  }
+
+  fontStatus.textContent = "正在请求字体权限...";
+
+  try {
+    const fonts = await window.queryLocalFonts();
+    const families = [...new Set(fonts.map((font) => font.family).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, "zh-Hans-CN"),
+    );
+
+    removeSystemFontOptions();
+
+    for (const family of families) {
+      const option = document.createElement("option");
+      option.value = quoteFontFamily(family);
+      option.textContent = family;
+      option.dataset.systemFont = "true";
+      fontPreset.append(option);
+    }
+
+    fontStatus.textContent = `已读取 ${families.length} 个字体家族。`;
+    syncFontPresetSelection();
+  } catch {
+    fontStatus.textContent = "未获得字体权限，请使用预设或手动输入。";
+  }
+}
+
+function removeSystemFontOptions(): void {
+  for (const option of Array.from(fontPreset.options)) {
+    if (option.dataset.systemFont === "true") {
+      option.remove();
+    }
+  }
+}
+
+function syncFontPresetSelection(): void {
+  const matchingOption = Array.from(fontPreset.options).find((option) => option.value === state.fontFamily);
+  fontPreset.value = matchingOption ? matchingOption.value : "";
+}
+
+function quoteFontFamily(family: string): string {
+  const cleaned = family.replace(/"/g, "").trim();
+  return cleaned.includes(" ") ? `"${cleaned}", sans-serif` : `${cleaned}, sans-serif`;
 }
 
 function downloadBlob(blob: Blob, filename: string): void {
@@ -390,4 +523,15 @@ function getElement<T extends HTMLElement>(id: string): T {
   }
 
   return element as T;
+}
+
+function escapeAttribute(value: string): string {
+  return escapeHtml(value).replace(/"/g, "&quot;");
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
