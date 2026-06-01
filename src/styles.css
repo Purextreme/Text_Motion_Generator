@@ -36,7 +36,7 @@
 :root {
   color: #d9f9ff;
   background: #07090d;
-  font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+  font-family: "Noto Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "OPPOSans", "PingFang SC", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -357,6 +357,30 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.font-warning {
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  max-width: 90%;
+  padding: 0.45rem 1rem;
+  border: 1px solid rgba(255, 180, 30, 0.5);
+  border-radius: 6px;
+  color: #ffcc66;
+  background: rgba(40, 20, 0, 0.85);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  backdrop-filter: blur(6px);
+}
+
+.font-warning[hidden] {
+  display: none;
+}
+
 .canvas-stage {
   position: relative;
   display: grid;
@@ -393,6 +417,40 @@ canvas {
   object-fit: contain;
   image-rendering: auto;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+
+/* 透明背景时在 canvas 下方显示棋盘格 */
+.canvas-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: #c0c0c0;
+  background-image:
+    linear-gradient(45deg, #888 25%, transparent 25%, transparent 75%, #888 75%),
+    linear-gradient(45deg, #888 25%, transparent 25%, transparent 75%, #888 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 10px 10px;
+  border-radius: 8px;
+}
+
+.canvas-stage canvas {
+  position: relative;
+  z-index: 1;
+}
+
+.font-actual {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: rgba(0, 246, 255, 0.72);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.font-actual--fallback {
+  color: rgba(255, 180, 30, 0.85);
 }
 
 .transport {

@@ -1,6 +1,6 @@
 import "./styles.css";
 import type { BackgroundMode, TextEffectControl, TextEffectControlValue, TextEffectParams } from "./effects/types";
-import { effects, getDefaultEffect } from "./effects/registry";
+import { effects, getDefaultEffect, getEffectIndex } from "./effects/registry";
 import { configureCanvas, renderFrame } from "./renderer/canvasRenderer";
 import { exportPngSequenceZip } from "./renderer/exportPngSequence";
 
@@ -34,17 +34,15 @@ interface AppState {
   frame: number;
 }
 
-const DEFAULT_FONT_STACK = '"Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif';
+// 默认字体栈：开源优先，最后用 web font 兜底，确保不依赖任何商用字体
+// Noto Sans SC = 思源黑体（Google 发行版），与 Source Han Sans SC（Adobe 发行版）是同一套字体
+const DEFAULT_FONT_STACK = '"Noto Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "OPPOSans", "PingFang SC", sans-serif';
 const FONT_PRESETS = [
-  { label: "中文默认字体栈", value: DEFAULT_FONT_STACK },
-  { label: "Microsoft YaHei UI", value: '"Microsoft YaHei UI", sans-serif' },
-  { label: "Microsoft YaHei", value: '"Microsoft YaHei", sans-serif' },
-  { label: "SimHei", value: "SimHei, sans-serif" },
-  { label: "SimSun", value: "SimSun, serif" },
-  { label: "OPPOSans", value: "OPPOSans, sans-serif" },
-  { label: "PingFang SC", value: '"PingFang SC", sans-serif' },
-  { label: "Noto Sans CJK SC", value: '"Noto Sans CJK SC", sans-serif' },
-  { label: "Source Han Sans SC", value: '"Source Han Sans SC", sans-serif' },
+  { label: "默认字体栈（开源）", value: DEFAULT_FONT_STACK },
+  { label: "Noto Sans SC / 思源黑体", value: '"Noto Sans SC", "Source Han Sans SC", sans-serif' },
+  { label: "Source Han Sans SC（Adobe 发行版）", value: '"Source Han Sans SC", "Noto Sans SC", sans-serif' },
+  { label: "OPPOSans（免费可商用）", value: '"OPPOSans", sans-serif' },
+  { label: "PingFang SC（macOS 系统）", value: '"PingFang SC", sans-serif' },
 ];
 const FONT_WEIGHTS = [
   { label: "Light / 300", value: "300" },
@@ -127,7 +125,10 @@ app.innerHTML = `
           <span>效果模板</span>
           <select id="effect">
             ${effects
-              .map((effect) => `<option value="${escapeAttribute(effect.id)}">${escapeHtml(effect.name)} v${escapeHtml(effect.version)}</option>`)
+              .map((effect) => {
+                const index = getEffectIndex(effect.id);
+                return `<option value="${escapeAttribute(effect.id)}">${index}. ${escapeHtml(effect.name)} v${escapeHtml(effect.version)}</option>`;
+              })
               .join("")}
           </select>
         </label>
@@ -232,12 +233,14 @@ app.innerHTML = `
       </div>
 
       <div class="canvas-stage">
+        <div id="fontWarning" class="font-warning" hidden></div>
         <canvas id="preview" aria-label="Animation preview"></canvas>
       </div>
       <div class="transport">
         <div id="timecode" class="timecode">00:00 / 00:02</div>
         <input id="timeline" type="range" min="0" max="59" step="1" value="0" />
         <div id="frameReadout" class="progress-text">Frame 0</div>
+        <div id="fontActual" class="font-actual"></div>
       </div>
     </section>
   </main>
@@ -262,8 +265,78 @@ let lastTimestamp = performance.now();
 let ctx = configureCanvas(canvas, getDimensions().width, getDimensions().height);
 
 bindControls();
+updateFontWarning();
+updateFontActual();
 renderCurrentFrame();
 requestAnimationFrame(tick);
+
+function detectActualFont(fontFamily: string): { font: string; isFallback: boolean } {
+  const fonts = fontFamily.split(",").map((f) => f.trim().replace(/^["']|["']$/g, ""));
+  const genericFamilies = ["sans-serif", "serif", "monospace", "cursive", "fantasy", "system-ui"];
+
+  const testCanvas = document.createElement("canvas");
+  const testCtx = testCanvas.getContext("2d");
+  if (!testCtx) return { font: fonts[0] ?? "unknown", isFallback: false };
+
+  const testStr = "测试Test1234字体检测AB";
+  const testSize = 72;
+
+  // 完整字体栈的实际宽度
+  testCtx.font = `${testSize}px ${fontFamily}`;
+  const actualWidth = testCtx.measureText(testStr).width;
+
+  // 逐一排查：哪个字体单独渲染时宽度与完整栈一致，哪个就是实际生效的
+  for (const font of fonts) {
+    const lower = font.toLowerCase();
+    if (genericFamilies.includes(lower)) continue;
+
+    testCtx.font = `${testSize}px "${font}"`;
+    const candidateWidth = testCtx.measureText(testStr).width;
+
+    if (Math.abs(candidateWidth - actualWidth) < 0.5) {
+      return { font, isFallback: false };
+    }
+  }
+
+  // 所有指定字体都没匹配上，说明在用一个泛型 fallback
+  return { font: "sans-serif（系统默认）", isFallback: true };
+}
+
+function updateFontWarning(): void {
+  const effectiveFamily = getEffectiveFontFamily();
+  const result = detectActualFont(effectiveFamily);
+  const warningEl = document.getElementById("fontWarning");
+
+  if (!warningEl) return;
+
+  if (!result.isFallback) {
+    warningEl.setAttribute("hidden", "");
+    return;
+  }
+
+  const firstFont = effectiveFamily.split(",")[0].trim().replace(/^["']|["']$/g, "");
+  warningEl.removeAttribute("hidden");
+  warningEl.textContent = `⚠ 字体不可用：「${firstFont}」未安装，当前显示为系统默认字体`;
+}
+
+function updateFontActual(): void {
+  const effectiveFamily = getEffectiveFontFamily();
+  const result = detectActualFont(effectiveFamily);
+  const el = document.getElementById("fontActual");
+  if (!el) return;
+
+  const selected = effectiveFamily.split(",")[0].trim().replace(/^["']|["']$/g, "");
+  if (result.isFallback) {
+    el.textContent = `字体: ${result.font}（选中: ${selected}）`;
+    el.classList.add("font-actual--fallback");
+  } else if (result.font !== selected) {
+    el.textContent = `字体: ${result.font}（选中: ${selected}）`;
+    el.classList.remove("font-actual--fallback");
+  } else {
+    el.textContent = `字体: ${result.font}`;
+    el.classList.remove("font-actual--fallback");
+  }
+}
 
 function bindControls(): void {
   bindSelect("effect", (value) => {
@@ -284,6 +357,8 @@ function bindControls(): void {
   });
   bindSelect("fontPreset", (value) => {
     state.fontFamily = value;
+    updateFontWarning();
+    updateFontActual();
   });
   bindSelect("fontWeight", (value) => {
     state.fontWeight = value;
@@ -592,6 +667,8 @@ async function scanLocalFonts(): Promise<void> {
       ? `已添加 ${appendedCount} 个${scanSource}。`
       : `已确认 ${families.length} 个${scanSource}，均已在预设中。`;
   syncFontPresetSelection();
+  updateFontWarning();
+  updateFontActual();
 }
 
 function appendSystemFontOptions(families: string[]): number {
