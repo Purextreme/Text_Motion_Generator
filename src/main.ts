@@ -263,6 +263,7 @@ const fontStatus = getElement<HTMLSpanElement>("fontStatus");
 
 let lastTimestamp = performance.now();
 let ctx = configureCanvas(canvas, getDimensions().width, getDimensions().height);
+const transparentPreviewCanvas = document.createElement("canvas");
 
 bindControls();
 updateFontWarning();
@@ -443,9 +444,40 @@ function tick(timestamp: number): void {
 function renderCurrentFrame(): void {
   const dimensions = getDimensions();
   const nextCtx = configureCanvas(canvas, dimensions.width, dimensions.height);
+  const params = getRenderParams(state.frame);
   ctx = nextCtx;
-  renderFrame(ctx, activeEffect, getRenderParams(state.frame));
+
+  if (params.background === "transparent") {
+    const transparentPreviewCtx = configureCanvas(transparentPreviewCanvas, dimensions.width, dimensions.height);
+    renderFrame(transparentPreviewCtx, activeEffect, params);
+    drawPreviewCheckerboard(ctx, dimensions.width, dimensions.height);
+    ctx.drawImage(transparentPreviewCanvas, 0, 0);
+  } else {
+    renderFrame(ctx, activeEffect, params);
+  }
+
   syncTimeline();
+}
+
+function drawPreviewCheckerboard(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+  const cellSize = Math.max(20, Math.round(Math.min(width, height) / 48));
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.filter = "none";
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "#20262e";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#131922";
+
+  for (let y = 0; y < height; y += cellSize) {
+    for (let x = 0; x < width; x += cellSize) {
+      if (((x / cellSize) + (y / cellSize)) % 2 === 0) {
+        ctx.fillRect(x, y, cellSize, cellSize);
+      }
+    }
+  }
 }
 
 function getRenderParams(frame: number): TextEffectParams {
