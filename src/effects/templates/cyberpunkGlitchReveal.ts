@@ -2,6 +2,7 @@ import type { TextEffectParams } from "../types";
 import { defineTextEffect } from "../types";
 import { clamp, easeOutCubic, smoothstep } from "../../utils/easing";
 import { randomFromSeed, seededValue } from "../../utils/seededRandom";
+import { drawHorizontalSlices, drawRgbSplit, drawScanlines as drawPostScanlines } from "../utils/postprocess";
 
 const CHAR_POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789零一二三四五六七八九甲乙丙丁子丑寅卯#$%&<>[]{}+-*/_";
 
@@ -75,8 +76,8 @@ export const effect = defineTextEffect({
       drawHud(ctx, params, layout, progress, glitch.amount);
     }
 
-    drawTextComposite(ctx, layer, params, glitch);
-    drawScanlines(ctx, params, layout, progress);
+    drawTextComposite(ctx, layer, params, layout, glitch);
+    drawScanlineOverlay(ctx, params, layout, progress);
   },
 });
 
@@ -239,60 +240,27 @@ function drawTextComposite(
   ctx: CanvasRenderingContext2D,
   layer: HTMLCanvasElement,
   params: TextEffectParams,
+  layout: TextLayout,
   glitch: ReturnType<typeof getGlitchState>,
 ): void {
   const split = params.fontSize * (0.012 + glitch.amount * 0.08) * clamp(params.intensity);
-
-  if (split > 0.4) {
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = 0.16 + glitch.amount * 0.38;
-    ctx.filter = "none";
-    ctx.drawImage(tintLayer(layer, "#ff235a"), -split, 0);
-    ctx.drawImage(tintLayer(layer, "#1b7cff"), split, 0);
-    ctx.restore();
-  }
-
-  ctx.drawImage(layer, 0, 0);
+  drawRgbSplit(ctx, layer, split, 0.16 + glitch.amount * 0.38);
 
   if (glitch.amount <= 0.01) {
     return;
   }
 
   const rand = randomFromSeed((params.seed ^ (params.frame * 1103515245)) >>> 0);
-  const slices = 3 + Math.floor(rand() * 6);
-  const bandHeight = params.fontSize * (0.12 + rand() * 0.25);
   const centerY = params.height * (0.42 + rand() * 0.16);
-
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  for (let i = 0; i < slices; i += 1) {
-    const rawY = Math.round(centerY + (rand() - 0.5) * params.fontSize * 1.75);
-    const rawH = Math.max(2, Math.round(bandHeight * (0.5 + rand())));
-    const y = Math.max(0, Math.min(params.height - 1, rawY));
-    const h = Math.max(1, Math.min(rawH, params.height - y));
-    const offset = (rand() - 0.5) * params.fontSize * 0.42 * params.intensity * glitch.amount;
-    ctx.globalAlpha = 0.55 + rand() * 0.35;
-    ctx.drawImage(layer, 0, y, params.width, h, offset, y, params.width, h);
-  }
-  ctx.restore();
-}
-
-function tintLayer(source: HTMLCanvasElement, color: string): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = source.width;
-  canvas.height = source.height;
-  const ctx = canvas.getContext("2d", { alpha: true });
-
-  if (!ctx) {
-    throw new Error("Canvas 2D is not available for RGB split rendering.");
-  }
-
-  ctx.drawImage(source, 0, 0);
-  ctx.globalCompositeOperation = "source-in";
-  ctx.fillStyle = color;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  return canvas;
+  drawHorizontalSlices(
+    ctx,
+    layer,
+    params.seed,
+    params.frame,
+    params.intensity * glitch.amount,
+    centerY,
+    layout.height + params.fontSize * 1.25,
+  );
 }
 
 function drawHud(
@@ -356,7 +324,7 @@ function drawCorner(
   ctx.stroke();
 }
 
-function drawScanlines(
+function drawScanlineOverlay(
   ctx: CanvasRenderingContext2D,
   params: TextEffectParams,
   layout: TextLayout,
@@ -375,23 +343,9 @@ function drawScanlines(
   const height = Math.min(params.height - top, layout.height + areaPad * 2);
   const spacing = Math.max(3, Math.round(params.fontSize * 0.085));
   const drift = (params.frame * 0.35) % spacing;
+  const opacity = visible * scanline * (params.background === "transparent" ? 0.16 : 0.22);
 
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(left, top, width, height);
-  ctx.clip();
-  ctx.globalAlpha = visible * scanline * (params.background === "transparent" ? 0.16 : 0.22);
-  ctx.strokeStyle = "#c9ffff";
-  ctx.lineWidth = 1;
-
-  for (let y = top - spacing + drift; y < top + height + spacing; y += spacing) {
-    ctx.beginPath();
-    ctx.moveTo(left, Math.round(y) + 0.5);
-    ctx.lineTo(left + width, Math.round(y) + 0.5);
-    ctx.stroke();
-  }
-
-  ctx.restore();
+  drawPostScanlines(ctx, { x: left, y: top, width, height }, opacity, spacing, drift);
 }
 
 function getGlitchState(params: TextEffectParams, progress: number): { amount: number } {

@@ -134,6 +134,12 @@ const accentColor = typeof params.custom.accentColor === "string" ? params.custo
 - 不要修改导出逻辑。
 - 不要修改主程序。
 
+## 推荐的游戏感动效结构
+
+建议按稳定的局部合成流程组织模板：先把清晰文字画到离屏文字层，再用 reveal mask 控制出现范围；出现瞬间叠加少量 RGB split 和 slice glitch；文字周边只画 local HUD decoration，例如短线、角标、小方块；最后在文字区域加轻微 scanline，并进入 final stabilize 阶段，让文字保持清晰、只有低强度 glow 呼吸。
+
+避免默认绘制全屏 HUD、复杂背景网格或持续随机闪烁。故障效果应集中在 reveal 前后几帧，稳定阶段以可读性为主。
+
 ## 给其他模型的提示词模板
 
 ```txt

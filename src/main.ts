@@ -98,7 +98,7 @@ const state: AppState = {
   duration: 2,
   fontSize: 96,
   fontFamily: DEFAULT_FONT_STACK,
-  fontWeight: "900",
+  fontWeight: "400",
   color: "#00f6ff",
   seed: 1234,
   background: "transparent",
